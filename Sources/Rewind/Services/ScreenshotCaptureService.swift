@@ -1,0 +1,246 @@
+import AppKit
+import CoreGraphics
+import Foundation
+
+enum ScreenshotCaptureError: LocalizedError {
+    case imageCaptureFailed
+    case imageEncodingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .imageCaptureFailed:
+            return "Could not capture the focused window."
+        case .imageEncodingFailed:
+            return "Could not compress the screenshot."
+        }
+    }
+}
+
+@MainActor
+final class ScreenshotCaptureService {
+    struct Configuration {
+        var intervalSeconds: Double = 30
+        var maxImageDimension: CGFloat = 1_400
+        var preferredImageSizeBytes: Int = 200_000
+        var maximumImageSizeBytes: Int = 260_000
+    }
+
+    var onCapture: ((ScreenshotEntry) -> Void)?
+    var onStatus: ((String) -> Void)?
+    var onNextCaptureAt: ((Date?) -> Void)?
+
+    private let storage: ScreenshotStorage
+    private let configuration: Configuration
+    private var intervalSeconds: Double
+    private var loopTask: Task<Void, Never>?
+
+    init(storage: ScreenshotStorage, configuration: Configuration = Configuration()) {
+        self.storage = storage
+        self.configuration = configuration
+        self.intervalSeconds = configuration.intervalSeconds
+    }
+
+    var isRunning: Bool {
+        loopTask != nil
+    }
+
+    func start() {
+        guard loopTask == nil else {
+            return
+        }
+
+        loopTask = Task { [weak self] in
+            await self?.runCaptureLoop()
+        }
+    }
+
+    func stop() {
+        loopTask?.cancel()
+        loopTask = nil
+        onNextCaptureAt?(nil)
+    }
+
+    func updateInterval(seconds: Double) {
+        intervalSeconds = max(5, min(seconds, 3_600))
+    }
+
+    private func runCaptureLoop() async {
+        while !Task.isCancelled {
+            let nextInterval = intervalSeconds
+            let nextCaptureAt = Date().addingTimeInterval(nextInterval)
+            onNextCaptureAt?(nextCaptureAt)
+            onStatus?("Next capture in \(Int(nextInterval))s")
+
+            let duration = Duration.seconds(nextInterval)
+            try? await Task.sleep(for: duration)
+
+            guard !Task.isCancelled else {
+                onNextCaptureAt?(nil)
+                return
+            }
+
+            do {
+                if let screenshot = try captureFocusedWindow() {
+                    onCapture?(screenshot)
+                    onStatus?("Saved \(screenshot.appName) • \(formattedBytes(screenshot.byteSize))")
+                } else {
+                    onStatus?("No active window detected, skipping this cycle")
+                }
+            } catch {
+                onStatus?("Capture failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func captureFocusedWindow() throws -> ScreenshotEntry? {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            return nil
+        }
+
+        if app.bundleIdentifier == Bundle.main.bundleIdentifier {
+            return nil
+        }
+
+        let pid = app.processIdentifier
+        guard let focusedWindowID = focusedWindowID(for: pid) else {
+            return nil
+        }
+
+        let imageOptions: CGWindowImageOption = [.boundsIgnoreFraming, .nominalResolution]
+        guard let image = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            focusedWindowID,
+            imageOptions
+        ) else {
+            throw ScreenshotCaptureError.imageCaptureFailed
+        }
+
+        let downscaled = downscaledImage(from: image)
+        let jpegData = try compressedJPEGData(from: downscaled)
+
+        return try storage.saveScreenshot(
+            data: jpegData,
+            capturedAt: Date(),
+            appName: app.localizedName ?? "Unknown App",
+            bundleIdentifier: app.bundleIdentifier
+        )
+    }
+
+    private func focusedWindowID(for pid: pid_t) -> CGWindowID? {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+
+        for window in windows {
+            guard let ownerPID = window[kCGWindowOwnerPID as String] as? pid_t, ownerPID == pid else {
+                continue
+            }
+
+            let layer = window[kCGWindowLayer as String] as? Int ?? 0
+            guard layer == 0 else {
+                continue
+            }
+
+            let alpha = window[kCGWindowAlpha as String] as? Double ?? 1
+            guard alpha > 0.01 else {
+                continue
+            }
+
+            guard
+                let boundsDictionary = window[kCGWindowBounds as String] as? [String: Any],
+                let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary),
+                bounds.width > 120,
+                bounds.height > 120
+            else {
+                continue
+            }
+
+            guard let windowID = window[kCGWindowNumber as String] as? UInt32 else {
+                continue
+            }
+
+            return windowID
+        }
+
+        return nil
+    }
+
+    private func downscaledImage(from image: CGImage) -> CGImage {
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        let maxSide = max(width, height)
+        let scale = min(configuration.maxImageDimension / maxSide, 1)
+
+        guard scale < 0.999 else {
+            return image
+        }
+
+        let targetWidth = max(Int(width * scale), 1)
+        let targetHeight = max(Int(height * scale), 1)
+        let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+
+        guard let context = CGContext(
+            data: nil,
+            width: targetWidth,
+            height: targetHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: bitmapInfo
+        ) else {
+            return image
+        }
+
+        context.interpolationQuality = .low
+        context.draw(
+            image,
+            in: CGRect(x: 0, y: 0, width: CGFloat(targetWidth), height: CGFloat(targetHeight))
+        )
+
+        return context.makeImage() ?? image
+    }
+
+    private func compressedJPEGData(from image: CGImage) throws -> Data {
+        let representation = NSBitmapImageRep(cgImage: image)
+        let qualityCandidates = stride(from: 0.95, through: 0.35, by: -0.05)
+        var selectedData: Data?
+        var selectedDistance = Int.max
+        var fallbackSmallest: Data?
+
+        for quality in qualityCandidates {
+            let properties: [NSBitmapImageRep.PropertyKey: Any] = [.compressionFactor: quality]
+            guard let data = representation.representation(using: .jpeg, properties: properties) else {
+                continue
+            }
+
+            if fallbackSmallest == nil || data.count < fallbackSmallest?.count ?? .max {
+                fallbackSmallest = data
+            }
+
+            guard data.count <= configuration.maximumImageSizeBytes else {
+                continue
+            }
+
+            let distance = abs(data.count - configuration.preferredImageSizeBytes)
+            if distance < selectedDistance {
+                selectedData = data
+                selectedDistance = distance
+            }
+        }
+
+        guard let data = selectedData ?? fallbackSmallest else {
+            throw ScreenshotCaptureError.imageEncodingFailed
+        }
+
+        return data
+    }
+
+    private func formattedBytes(_ count: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useKB, .useMB]
+        return formatter.string(fromByteCount: Int64(count))
+    }
+}
