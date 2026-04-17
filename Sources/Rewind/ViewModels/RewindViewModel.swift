@@ -14,15 +14,21 @@ final class RewindViewModel: ObservableObject {
     private let storage: ScreenshotStorage
     private let captureService: ScreenshotCaptureService
     private let defaults: UserDefaults
+    private let calendar: Calendar
     private var nextCaptureAt: Date?
     private var countdownTask: Task<Void, Never>?
 
     private let enabledDefaultsKey = "rewind.captureEnabled"
 
-    init(storage: ScreenshotStorage = ScreenshotStorage(), defaults: UserDefaults = .standard) {
+    init(
+        storage: ScreenshotStorage = ScreenshotStorage(),
+        defaults: UserDefaults = .standard,
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
         self.storage = storage
         self.captureService = ScreenshotCaptureService(storage: storage)
         self.defaults = defaults
+        self.calendar = calendar
 
         screenshots = storage.loadAllScreenshots()
 
@@ -92,6 +98,10 @@ final class RewindViewModel: ObservableObject {
 
     func openStorageFolder() {
         NSWorkspace.shared.open(storage.rootDirectory)
+    }
+
+    func summary(for window: SummaryWindow) -> ActivitySummary {
+        ActivitySummary.build(from: screenshots, window: window, calendar: calendar)
     }
 
     private func ensureScreenRecordingPermission(interactive: Bool) -> Bool {

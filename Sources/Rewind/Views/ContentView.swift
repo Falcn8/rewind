@@ -16,6 +16,19 @@ private enum UIFormatters {
         formatter.countStyle = .file
         return formatter
     }()
+
+    static let timelineTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static let timelineDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE d"
+        return formatter
+    }()
 }
 
 private enum Theme {
@@ -37,6 +50,7 @@ struct ContentView: View {
     @State private var hoveredScreenshotID: UUID?
     @State private var wheelAccumulator: CGFloat = 0
     @State private var markerMidpoints: [UUID: CGFloat] = [:]
+    @State private var summaryWindow: SummaryWindow = .day
 
     private var screenshots: [ScreenshotEntry] {
         viewModel.screenshots
@@ -68,6 +82,10 @@ struct ContentView: View {
         return screenshots.firstIndex(where: { $0.id == selectedScreenshotID }) ?? 0
     }
 
+    private var activitySummary: ActivitySummary {
+        viewModel.summary(for: summaryWindow)
+    }
+
     var body: some View {
         ZStack {
             AtmosphereBackground()
@@ -75,12 +93,12 @@ struct ContentView: View {
 
             VStack(spacing: 20) {
                 headerPanel
-                viewerPanel
+                workspacePanels
             }
             .padding(24)
             .frame(maxWidth: 1_280)
         }
-        .frame(minWidth: 1_050, minHeight: 700)
+        .frame(minWidth: 1_160, minHeight: 740)
         .onAppear {
             syncSelection()
         }
@@ -167,6 +185,16 @@ struct ContentView: View {
         .shadow(color: Theme.accentA.opacity(0.05), radius: 30, x: 0, y: 18)
     }
 
+    private var workspacePanels: some View {
+        HStack(alignment: .top, spacing: 18) {
+            viewerPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            summaryPanel
+                .frame(width: 360)
+        }
+    }
+
     private var viewerPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -191,6 +219,230 @@ struct ContentView: View {
                 .stroke(Theme.surfaceBorder, lineWidth: 1)
         )
         .shadow(color: Theme.accentA.opacity(0.04), radius: 24, x: 0, y: 14)
+    }
+
+    private var summaryPanel: some View {
+        let summary = activitySummary
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(summary.window.reviewTitle)
+                        .font(.system(size: 22, weight: .semibold, design: .serif))
+                        .foregroundStyle(Theme.textPrimary)
+
+                    Text("Timeline summaries and app/project activity heatmap.")
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+
+                Spacer(minLength: 8)
+            }
+
+            Picker("Summary Period", selection: $summaryWindow) {
+                ForEach(SummaryWindow.allCases) { window in
+                    Text(window.title).tag(window)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            HStack(spacing: 8) {
+                summaryStatCard(title: "Captures", value: "\(summary.totalCaptures)")
+                summaryStatCard(title: "Contexts", value: "\(summary.activeContextCount)")
+                summaryStatCard(title: "Top App", value: summary.topContexts.first?.context.appName ?? "—")
+            }
+
+            Divider()
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Timeline")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Theme.textSecondary)
+                            .tracking(0.6)
+
+                        if summary.timeline.isEmpty {
+                            summaryPlaceholder(
+                                title: "No activity yet",
+                                detail: summary.window == .day
+                                    ? "Start capturing to generate a Today in Review timeline."
+                                    : "Capture activity across the week to populate this timeline."
+                            )
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(summary.timeline.prefix(6)) { item in
+                                    timelineRow(item: item)
+                                }
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Activity Heatmap")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Theme.textSecondary)
+                            .tracking(0.6)
+
+                        if summary.heatmapRows.isEmpty {
+                            summaryPlaceholder(
+                                title: "No heatmap data",
+                                detail: "Once screenshots are captured, this highlights activity by app/project."
+                            )
+                        } else {
+                            heatmap(summary: summary)
+                        }
+                    }
+                }
+                .padding(.bottom, 4)
+            }
+        }
+        .padding(18)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Theme.surfaceBorder, lineWidth: 1)
+        )
+        .shadow(color: Theme.accentA.opacity(0.04), radius: 24, x: 0, y: 14)
+    }
+
+    private func summaryStatCard(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(Theme.textSecondary)
+                .tracking(0.7)
+
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func summaryPlaceholder(title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.textPrimary)
+            Text(detail)
+                .font(.system(size: 11, weight: .regular, design: .rounded))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func timelineRow(item: TimelineSummary) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            RoundedRectangle(cornerRadius: 999, style: .continuous)
+                .fill(color(for: item.topContext).opacity(0.82))
+                .frame(width: 4, height: 44)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(timelineRangeText(for: item))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary)
+
+                let label = item.topContext?.displayName ?? "Mixed activity"
+                Text("\(item.captureCount) captures • \(label)")
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+
+                Text("\(item.activeContextCount) active context\(item.activeContextCount == 1 ? "" : "s")")
+                    .font(.system(size: 10, weight: .regular, design: .rounded))
+                    .foregroundStyle(Theme.textSecondary.opacity(0.86))
+            }
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private func heatmap(summary: ActivitySummary) -> some View {
+        let cellSize: CGFloat = summary.window == .day ? 8 : 16
+        let cellSpacing: CGFloat = summary.window == .day ? 2 : 4
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Text("App / Project")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 122, alignment: .leading)
+
+                HStack(spacing: cellSpacing) {
+                    ForEach(summary.heatmapColumns, id: \.self) { column in
+                        Text(summary.window == .day ? String(column.suffix(2)) : column)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Theme.textSecondary.opacity(0.9))
+                            .frame(width: cellSize, alignment: .center)
+                    }
+                }
+            }
+
+            ForEach(summary.heatmapRows) { row in
+                HStack(spacing: 7) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.context.compactLabel)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+
+                        if row.context.projectName != nil {
+                            Text(row.context.appName)
+                                .font(.system(size: 9, weight: .regular, design: .rounded))
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(width: 122, alignment: .leading)
+
+                    HStack(spacing: cellSpacing) {
+                        ForEach(Array(row.counts.enumerated()), id: \.offset) { _, count in
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(heatmapCellColor(count: count, row: row, max: summary.maxHeatValue))
+                                .frame(width: cellSize, height: cellSize)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                        .stroke(Color.black.opacity(0.12), lineWidth: 0.4)
+                                )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func timelineRangeText(for item: TimelineSummary) -> String {
+        if summaryWindow == .day {
+            return "\(UIFormatters.timelineTime.string(from: item.start)) - \(UIFormatters.timelineTime.string(from: item.end))"
+        }
+        return UIFormatters.timelineDay.string(from: item.start)
+    }
+
+    private func heatmapCellColor(count: Int, row: ActivityHeatmapRow, max: Int) -> Color {
+        let base = color(for: row.context)
+        guard count > 0 else {
+            return base.opacity(0.08)
+        }
+        let intensity = Double(count) / Double(max)
+        return base.opacity(0.24 + intensity * 0.72)
+    }
+
+    private func color(for context: ActivityContext?) -> Color {
+        guard let context else {
+            return Theme.accentA
+        }
+        return AppTintPalette.color(
+            for: context.colorKey,
+            bundleIdentifier: nil,
+            appName: context.appName
+        )
     }
 
     private var frameArea: some View {

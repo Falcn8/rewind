@@ -18,6 +18,11 @@ enum ScreenshotCaptureError: LocalizedError {
 
 @MainActor
 final class ScreenshotCaptureService {
+    private struct FocusedWindowContext {
+        let id: CGWindowID
+        let title: String?
+    }
+
     struct Configuration {
         var intervalSeconds: Double = 30
         var maxImageDimension: CGFloat = 1_400
@@ -102,7 +107,7 @@ final class ScreenshotCaptureService {
         }
 
         let pid = app.processIdentifier
-        guard let focusedWindowID = focusedWindowID(for: pid) else {
+        guard let focusedWindow = focusedWindowContext(for: pid) else {
             return nil
         }
 
@@ -110,7 +115,7 @@ final class ScreenshotCaptureService {
         guard let image = CGWindowListCreateImage(
             .null,
             .optionIncludingWindow,
-            focusedWindowID,
+            focusedWindow.id,
             imageOptions
         ) else {
             throw ScreenshotCaptureError.imageCaptureFailed
@@ -118,16 +123,19 @@ final class ScreenshotCaptureService {
 
         let downscaled = downscaledImage(from: image)
         let jpegData = try compressedJPEGData(from: downscaled)
+        let appName = app.localizedName ?? "Unknown App"
 
         return try storage.saveScreenshot(
             data: jpegData,
             capturedAt: Date(),
-            appName: app.localizedName ?? "Unknown App",
-            bundleIdentifier: app.bundleIdentifier
+            appName: appName,
+            bundleIdentifier: app.bundleIdentifier,
+            projectName: inferProjectName(from: focusedWindow.title, appName: appName),
+            windowTitle: focusedWindow.title
         )
     }
 
-    private func focusedWindowID(for pid: pid_t) -> CGWindowID? {
+    private func focusedWindowContext(for pid: pid_t) -> FocusedWindowContext? {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return nil
@@ -161,10 +169,95 @@ final class ScreenshotCaptureService {
                 continue
             }
 
-            return windowID
+            let windowTitle = (window[kCGWindowName as String] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            return FocusedWindowContext(
+                id: windowID,
+                title: windowTitle?.isEmpty == true ? nil : windowTitle
+            )
         }
 
         return nil
+    }
+
+    private func inferProjectName(from windowTitle: String?, appName: String) -> String? {
+        guard
+            let windowTitle,
+            !windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+
+        let separators = [" — ", " – ", " - ", " · ", " • ", " | ", ":"]
+        var tokens = [windowTitle]
+        for separator in separators {
+            tokens = tokens.flatMap { $0.components(separatedBy: separator) }
+        }
+
+        let normalizedAppName = normalizeWindowToken(appName)
+        let genericTokens = Set([
+            "new tab",
+            "new window",
+            "untitled",
+            "untitled window",
+            "start page",
+            "home"
+        ])
+
+        var bestToken: String?
+        var bestScore = Int.min
+
+        for rawToken in tokens {
+            let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard token.count >= 2 else {
+                continue
+            }
+
+            let normalizedToken = normalizeWindowToken(token)
+            guard
+                !normalizedToken.isEmpty,
+                normalizedToken != normalizedAppName,
+                !genericTokens.contains(normalizedToken)
+            else {
+                continue
+            }
+
+            var score = 0
+            if token.count <= 40 {
+                score += 2
+            } else {
+                score -= 1
+            }
+
+            if token.range(of: #"\.[A-Za-z0-9]{1,5}$"#, options: .regularExpression) == nil {
+                score += 2
+            } else {
+                score -= 2
+            }
+
+            if token.range(of: #"[A-Za-z0-9]"#, options: .regularExpression) != nil {
+                score += 1
+            }
+
+            if score > bestScore {
+                bestScore = score
+                bestToken = token
+            }
+        }
+
+        guard let bestToken, bestScore >= 1 else {
+            return nil
+        }
+
+        return bestToken
+    }
+
+    private func normalizeWindowToken(_ token: String) -> String {
+        token
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func downscaledImage(from image: CGImage) -> CGImage {

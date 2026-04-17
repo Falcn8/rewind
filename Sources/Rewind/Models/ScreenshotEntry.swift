@@ -7,6 +7,8 @@ struct ScreenshotEntry: Identifiable, Hashable {
     let capturedAt: Date
     let appName: String
     let bundleIdentifier: String?
+    let projectName: String?
+    let windowTitle: String?
     let byteSize: Int
 
     var appKey: String {

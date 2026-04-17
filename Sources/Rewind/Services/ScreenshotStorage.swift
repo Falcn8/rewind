@@ -6,6 +6,8 @@ private struct ScreenshotRecord: Codable, Hashable {
     let capturedAt: Date
     let appName: String
     let bundleIdentifier: String?
+    let projectName: String?
+    let windowTitle: String?
     let byteSize: Int
 }
 
@@ -81,6 +83,8 @@ final class ScreenshotStorage {
                         capturedAt: record.capturedAt,
                         appName: record.appName,
                         bundleIdentifier: record.bundleIdentifier,
+                        projectName: record.projectName,
+                        windowTitle: record.windowTitle,
                         byteSize: record.byteSize
                     )
                 )
@@ -94,7 +98,9 @@ final class ScreenshotStorage {
         data: Data,
         capturedAt: Date,
         appName: String,
-        bundleIdentifier: String?
+        bundleIdentifier: String?,
+        projectName: String?,
+        windowTitle: String?
     ) throws -> ScreenshotEntry {
         try createRootDirectoryIfNeeded()
 
@@ -113,6 +119,8 @@ final class ScreenshotStorage {
             capturedAt: capturedAt,
             appName: appName,
             bundleIdentifier: bundleIdentifier,
+            projectName: projectName,
+            windowTitle: windowTitle,
             byteSize: data.count
         )
 
@@ -126,6 +134,8 @@ final class ScreenshotStorage {
             capturedAt: record.capturedAt,
             appName: record.appName,
             bundleIdentifier: record.bundleIdentifier,
+            projectName: record.projectName,
+            windowTitle: record.windowTitle,
             byteSize: record.byteSize
         )
     }
@@ -195,6 +205,8 @@ final class ScreenshotStorage {
                 capturedAt: createdAt,
                 appName: appName.isEmpty ? "Unknown App" : appName,
                 bundleIdentifier: nil,
+                projectName: nil,
+                windowTitle: nil,
                 byteSize: (try? Data(contentsOf: imageURL).count) ?? 0
             )
         }
