@@ -1,12 +1,11 @@
 import Foundation
-import Testing
+import XCTest
 @testable import Rewind
 
-struct ActivitySummaryTests {
-    @Test
-    func dailySummaryGroupsByAppAndProject() throws {
+final class ActivitySummaryTests: XCTestCase {
+    func testDailySummaryGroupsByAppAndProject() throws {
         let calendar = fixedCalendar()
-        let now = try #require(calendar.date(from: DateComponents(
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
             calendar: calendar,
             year: 2026,
             month: 4,
@@ -18,22 +17,22 @@ struct ActivitySummaryTests {
             makeEntry(
                 appName: "Xcode",
                 projectName: "Rewind",
-                capturedAt: try #require(date(calendar: calendar, year: 2026, month: 4, day: 17, hour: 9, minute: 5))
+                capturedAt: try XCTUnwrap(date(calendar: calendar, year: 2026, month: 4, day: 17, hour: 9, minute: 5))
             ),
             makeEntry(
                 appName: "Xcode",
                 projectName: "Rewind",
-                capturedAt: try #require(date(calendar: calendar, year: 2026, month: 4, day: 17, hour: 9, minute: 55))
+                capturedAt: try XCTUnwrap(date(calendar: calendar, year: 2026, month: 4, day: 17, hour: 9, minute: 55))
             ),
             makeEntry(
                 appName: "Safari",
                 projectName: "OpenAI Docs",
-                capturedAt: try #require(date(calendar: calendar, year: 2026, month: 4, day: 17, hour: 14, minute: 20))
+                capturedAt: try XCTUnwrap(date(calendar: calendar, year: 2026, month: 4, day: 17, hour: 14, minute: 20))
             ),
             makeEntry(
                 appName: "Slack",
                 projectName: nil,
-                capturedAt: try #require(date(calendar: calendar, year: 2026, month: 4, day: 16, hour: 22, minute: 20))
+                capturedAt: try XCTUnwrap(date(calendar: calendar, year: 2026, month: 4, day: 16, hour: 22, minute: 20))
             )
         ]
 
@@ -44,23 +43,22 @@ struct ActivitySummaryTests {
             calendar: calendar
         )
 
-        #expect(summary.totalCaptures == 3)
-        #expect(summary.activeContextCount == 2)
-        #expect(summary.topContexts.first?.context.appName == "Xcode")
-        #expect(summary.topContexts.first?.context.projectName == "Rewind")
-        #expect(summary.topContexts.first?.captureCount == 2)
+        XCTAssertEqual(summary.totalCaptures, 3)
+        XCTAssertEqual(summary.activeContextCount, 2)
+        XCTAssertEqual(summary.topContexts.first?.context.appName, "Xcode")
+        XCTAssertEqual(summary.topContexts.first?.context.projectName, "Rewind")
+        XCTAssertEqual(summary.topContexts.first?.captureCount, 2)
 
-        let xcodeRow = try #require(summary.heatmapRows.first(where: { row in
+        let xcodeRow = try XCTUnwrap(summary.heatmapRows.first(where: { row in
             row.context.appName == "Xcode" && row.context.projectName == "Rewind"
         }))
-        #expect(xcodeRow.counts[9] == 2)
-        #expect(summary.timeline.contains(where: { $0.captureCount == 2 }))
+        XCTAssertEqual(xcodeRow.counts[9], 2)
+        XCTAssertTrue(summary.timeline.contains(where: { $0.captureCount == 2 }))
     }
 
-    @Test
-    func weeklySummaryBuildsSevenDayHeatmap() throws {
+    func testWeeklySummaryBuildsSevenDayHeatmap() throws {
         let calendar = fixedCalendar(firstWeekday: 2)
-        let now = try #require(calendar.date(from: DateComponents(
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
             calendar: calendar,
             year: 2026,
             month: 4,
@@ -68,9 +66,9 @@ struct ActivitySummaryTests {
             hour: 10
         )))
 
-        let monday = try #require(date(calendar: calendar, year: 2026, month: 4, day: 13, hour: 11, minute: 0))
-        let wednesday = try #require(date(calendar: calendar, year: 2026, month: 4, day: 15, hour: 15, minute: 30))
-        let sundayPrior = try #require(date(calendar: calendar, year: 2026, month: 4, day: 12, hour: 9, minute: 0))
+        let monday = try XCTUnwrap(date(calendar: calendar, year: 2026, month: 4, day: 13, hour: 11, minute: 0))
+        let wednesday = try XCTUnwrap(date(calendar: calendar, year: 2026, month: 4, day: 15, hour: 15, minute: 30))
+        let sundayPrior = try XCTUnwrap(date(calendar: calendar, year: 2026, month: 4, day: 12, hour: 9, minute: 0))
 
         let entries = [
             makeEntry(appName: "Xcode", projectName: "Rewind", capturedAt: monday),
@@ -85,16 +83,16 @@ struct ActivitySummaryTests {
             calendar: calendar
         )
 
-        #expect(summary.totalCaptures == 2)
-        #expect(summary.heatmapColumns.count == 7)
-        #expect(summary.timeline.count >= 2)
+        XCTAssertEqual(summary.totalCaptures, 2)
+        XCTAssertEqual(summary.heatmapColumns.count, 7)
+        XCTAssertGreaterThanOrEqual(summary.timeline.count, 2)
 
-        let xcodeRow = try #require(summary.heatmapRows.first(where: { row in
+        let xcodeRow = try XCTUnwrap(summary.heatmapRows.first(where: { row in
             row.context.appName == "Xcode" && row.context.projectName == "Rewind"
         }))
 
-        #expect(xcodeRow.totalCaptures == 2)
-        #expect(xcodeRow.counts.reduce(0, +) == 2)
+        XCTAssertEqual(xcodeRow.totalCaptures, 2)
+        XCTAssertEqual(xcodeRow.counts.reduce(0, +), 2)
     }
 
     private func fixedCalendar(firstWeekday: Int = 1) -> Calendar {
