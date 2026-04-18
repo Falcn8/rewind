@@ -1,0 +1,60 @@
+name: Release Artifact
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for manual runs)"
+        required: true
+        default: "0.1.0"
+      bundle_id:
+        description: "CFBundleIdentifier"
+        required: true
+        default: "com.example.rewind"
+
+jobs:
+  package:
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ github.event.inputs.version }}"
+          fi
+
+          if [[ -n "${{ github.event.inputs.bundle_id }}" ]]; then
+            bundle_id="${{ github.event.inputs.bundle_id }}"
+          else
+            bundle_id="com.example.rewind"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "bundle_id=${bundle_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Package Unsigned App
+        run: |
+          chmod +x scripts/package-macos.sh
+          scripts/package-macos.sh \
+            --clean \
+            --version "${{ steps.meta.outputs.version }}" \
+            --build-number "${{ github.run_number }}" \
+            --bundle-id "${{ steps.meta.outputs.bundle_id }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rewind-macos-${{ steps.meta.outputs.version }}
+          path: dist/*.zip
+          if-no-files-found: error

@@ -102,7 +102,15 @@ final class ScreenshotCaptureService {
             return nil
         }
 
-        if app.bundleIdentifier == Bundle.main.bundleIdentifier {
+        if app.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            return nil
+        }
+
+        if
+            let appBundleID = app.bundleIdentifier,
+            let mainBundleID = Bundle.main.bundleIdentifier,
+            appBundleID == mainBundleID
+        {
             return nil
         }
 
