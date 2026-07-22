@@ -1,0 +1,20 @@
+{
+  "name": "rewind-promo-video",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "preview": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts RewindPromo out/rewind-promo.mp4 --codec=h264 --crf=16 --pixel-format=yuv420p",
+    "render:prores": "remotion render src/index.ts RewindPromo out/rewind-promo.mov --codec=prores --prores-profile=4444"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.496",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.496"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "typescript": "5.9.3"
+  }
+}

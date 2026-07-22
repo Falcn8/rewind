@@ -4,6 +4,12 @@ Rewind is a macOS SwiftUI app that captures the frontmost window on an interval 
 
 `~/Library/Application Support/Rewind/Screenshots`
 
+## Promo Video
+
+[![Watch the Rewind promo video](promo-video/preview.jpg)](promo-video/out/rewind-promo.mp4)
+
+[Watch the 30-second Rewind promo](promo-video/out/rewind-promo.mp4) or explore the editable [Remotion source](promo-video/README.md).
+
 ## Local Development
 
 ```bash

@@ -1,0 +1,3 @@
+node_modules/
+out/*
+!out/rewind-promo.mp4
